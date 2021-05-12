@@ -24,7 +24,7 @@ query: |
   // Helper function to extract relevant fields from AuditLog events
   let auditLogEvents = view (startTimeSpan:timespan, operation:dynamic)  {
       AuditLogs | where TimeGenerated >= ago(auditLookback)
-      | where OperationName in~ (operation)
+      | where OperationNameValue in~ (operation)
       | extend ModProps = iff(TargetResources.[0].modifiedProperties != "[]", TargetResources.[0].modifiedProperties, todynamic("NoValues"))
       | extend IpAddress = iff(isnotempty(tostring(parse_json(tostring(InitiatedBy.user)).ipAddress)), 
       tostring(parse_json(tostring(InitiatedBy.user)).ipAddress), tostring(parse_json(tostring(InitiatedBy.app)).ipAddress))
@@ -44,15 +44,15 @@ query: |
       | extend PropertyName = tostring(ModProps.displayName), newValue = replace("\"","",tostring(ModProps.newValue));
   };
   let UserAdd = auditLogEvents(auditLookback, opName) 
-  | project Action = "User Added", TimeGenerated, Type, InitiatedBy_Caller = InitiatedBy, IpAddress, TargetUserName = tolower(TargetUserName), OperationName, PropertyName_ResourceId = PropertyName, Value = newValue;
+  | project Action = "User Added", TimeGenerated, Type, InitiatedBy_Caller = InitiatedBy, IpAddress, TargetUserName = tolower(TargetUserName), OperationNameValue, PropertyName_ResourceId = PropertyName, Value = newValue;
   // Get the simple list of creatd users so we can use later to get just the associated resource creation events
   let SimpleUserList = UserAdd | project TimeGenerated, TargetUserName;
   let ResourceCreation = AzureActivity
   | where TimeGenerated >= ago(auditLookback)
-  // We look for any Operation that created and then succeeded where ActivityStatus has a value so that we can provide context
-  | where OperationName has "Create"
-  | where ActivityStatus has "Succeeded"
-  | project Action = "Resource Created", ResourceCreationTimeGenerated = TimeGenerated, Type, InitiatedBy_Caller = tolower(Caller), IpAddress = CallerIpAddress, OperationName, Value = OperationNameValue, PropertyName_ResourceId = ResourceId;
+  // We look for any Operation that created and then succeeded where ActivityStatusValue has a value so that we can provide context
+  | where OperationNameValue has "Create"
+  | where ActivityStatusValue has "Succeeded"
+  | project Action = "Resource Created", ResourceCreationTimeGenerated = TimeGenerated, Type, InitiatedBy_Caller = tolower(Caller), IpAddress = CallerIpAddress, OperationNameValue, Value = OperationNameValue, PropertyName_ResourceId = ResourceId;
   // Get just the Resources added by the new user
   let ResourceMatch = SimpleUserList | join kind= innerunique (
      ResourceCreation
@@ -71,6 +71,6 @@ query: |
   UserAddWithResource 
   | union isfuzzy=true ResourceMatch
   | extend PropertySet = pack("Value", Value, "PropertyName_ResourceId", PropertyName_ResourceId) 
-  | summarize StartTimeUtc = min(TimeGenerated), EndTimeUtc = max(TimeGenerated), makeset(PropertySet)  by Action, Type, TargetUserName, InitiatedBy_Caller, IpAddress, OperationName
+  | summarize StartTimeUtc = min(TimeGenerated), EndTimeUtc = max(TimeGenerated), makeset(PropertySet)  by Action, Type, TargetUserName, InitiatedBy_Caller, IpAddress, OperationNameValue
   | order by StartTimeUtc asc 
   | extend timestamp = StartTimeUtc, AccountCustomEntity = TargetUserName, IPCustomEntity = IpAddress
